@@ -41,9 +41,9 @@ export default function ModelDownloader() {
     setIsLoading(true); isLoadingRef.current = true;
     setError(''); setProgress(0); setStatusMsg('Starting...');
     try {
-      await ModelManager.downloadModel('lfm2-350m-q4_k_m', (pct: number) => {
-        setProgress(pct); setStatusMsg(`Downloading ${pct}%`);
-      });
+await ModelManager.downloadModel('lfm2-350m-q4_k_m', (pct: number) => {
+  setProgress(pct); setStatusMsg(`Downloading ${pct}%`);
+});
       setProgress(95); setStatusMsg('Loading into memory...');
       await ModelManager.loadModel('lfm2-350m-q4_k_m');
       setProgress(98); setStatusMsg('Verifying...');
