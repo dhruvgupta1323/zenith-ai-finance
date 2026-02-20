@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { ModelManager, ModelCategory } from '@runanywhere/web';
 
+const MODEL_ID = 'smollm2-360m';
+
 export default function ModelDownloader() {
   const [isLoaded, setIsLoaded]   = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -19,42 +21,88 @@ export default function ModelDownloader() {
 
   const tryLoadFromCache = async () => {
     try {
-      if (ModelManager.getLoadedModel(ModelCategory.Language)) { setIsLoaded(true); return; }
-      setStatusMsg('Checking cache...');
-      try { await ModelManager.loadModel('lfm2-350m-q4_k_m'); } catch { setStatusMsg(''); return; }
-      await new Promise(r => setTimeout(r, 600));
-      if (ModelManager.getLoadedModel(ModelCategory.Language)) { setIsLoaded(true); }
-      else { setStatusMsg(''); }
-    } catch { setStatusMsg(''); }
+      if (ModelManager.getLoadedModel(ModelCategory.Language)) {
+        setIsLoaded(true);
+        return;
+      }
+      setStatusMsg('Checking for cached model...');
+      try {
+        await ModelManager.loadModel(MODEL_ID);
+      } catch {
+        console.log('[Model] Not in cache, needs download');
+        setStatusMsg('');
+        return;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+      if (ModelManager.getLoadedModel(ModelCategory.Language)) {
+        setIsLoaded(true);
+      } else {
+        setStatusMsg('');
+      }
+    } catch {
+      setStatusMsg('');
+    }
   };
 
   const waitForModel = async (): Promise<boolean> => {
-    for (let i = 0; i < 30; i++) {
+    setStatusMsg('Model loading, please wait...');
+    for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      if (ModelManager.getLoadedModel(ModelCategory.Language)) return true;
-      setStatusMsg(`Verifying... ${i + 1}s`);
+      const model = ModelManager.getLoadedModel(ModelCategory.Language);
+      if (model) {
+        console.log('[Model] Loaded after', i + 1, 'seconds');
+        return true;
+      }
+      if (i % 10 === 0) setStatusMsg(`Still loading... ${i + 1}s`);
     }
     return false;
   };
 
   const download = async () => {
-    setIsLoading(true); isLoadingRef.current = true;
-    setError(''); setProgress(0); setStatusMsg('Starting...');
+    setIsLoading(true);
+    isLoadingRef.current = true;
+    setError('');
+    setProgress(0);
+    setStatusMsg('Starting download...');
+
     try {
-setProgress(50); setStatusMsg('Downloading...');
-await ModelManager.downloadModel('lfm2-350m-q4_k_m');
-      setProgress(95); setStatusMsg('Loading into memory...');
-      await ModelManager.loadModel('lfm2-350m-q4_k_m');
-      setProgress(98); setStatusMsg('Verifying...');
+      setProgress(20);
+      setStatusMsg('Downloading SmolLM2 360M model (~400 MB)...');
+
+      await ModelManager.downloadModel(MODEL_ID);
+
+      setProgress(70);
+      setStatusMsg('Download complete! Loading into memory...');
+
+      await ModelManager.loadModel(MODEL_ID);
+
+      setProgress(90);
+      setStatusMsg('Verifying model...');
+
       let model = ModelManager.getLoadedModel(ModelCategory.Language);
-      if (!model) { const ok = await waitForModel(); model = ok ? ModelManager.getLoadedModel(ModelCategory.Language) : null; }
-      if (model) { setProgress(100); setIsLoaded(true); setStatusMsg('Ready!'); }
-      else throw new Error('Model verification failed. Please refresh and try again.');
+
+      if (!model) {
+        setStatusMsg('Model loading (this may take a moment)...');
+        const success = await waitForModel();
+        model = success ? ModelManager.getLoadedModel(ModelCategory.Language) : null;
+      }
+
+      if (model) {
+        setProgress(100);
+        setIsLoaded(true);
+        setStatusMsg('Ready!');
+        console.log('[Model] SmolLM2 360M loaded successfully!');
+      } else {
+        throw new Error('Model failed to load. Please refresh and try again.');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setProgress(0); setStatusMsg('');
+      console.error('[Model] Error:', err);
+      setError(err instanceof Error ? err.message : 'Download failed. Please try again.');
+      setProgress(0);
+      setStatusMsg('');
     } finally {
-      setIsLoading(false); isLoadingRef.current = false;
+      setIsLoading(false);
+      isLoadingRef.current = false;
     }
   };
 
@@ -69,7 +117,7 @@ await ModelManager.downloadModel('lfm2-350m-q4_k_m');
       <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 8px #10B981', flexShrink: 0, animation: 'pulse-dot 2s ease-in-out infinite' }} />
       <div>
         <div style={{ fontWeight: 600, fontSize: '13px', color: '#10B981' }}>MODEL READY</div>
-        <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>On-device AI · LFM2 350M · CPU mode</div>
+        <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>On-device AI · SmolLM2 360M · CPU mode</div>
       </div>
       <style>{`@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
     </div>
@@ -79,7 +127,7 @@ await ModelManager.downloadModel('lfm2-350m-q4_k_m');
     <div style={{ padding: '16px', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
         <span style={{ fontSize: '12px', color: '#3B82F6', fontWeight: 600, letterSpacing: '0.06em' }}>
-          {progress < 95 ? 'DOWNLOADING MODEL' : 'LOADING INTO MEMORY'}
+          {progress < 70 ? 'DOWNLOADING MODEL' : 'LOADING INTO MEMORY'}
         </span>
         <span style={{ fontSize: '12px', color: '#3B82F6', fontWeight: 600 }}>{progress}%</span>
       </div>
@@ -87,7 +135,7 @@ await ModelManager.downloadModel('lfm2-350m-q4_k_m');
         <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg, #3B82F6, #10B981)', borderRadius: '99px', transition: 'width 0.3s ease' }} />
       </div>
       <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{statusMsg}</div>
-      {progress < 95 && <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '6px' }}>⚡ Keep this tab open and active</div>}
+      {progress < 70 && <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '6px' }}>⚡ Keep this tab open - downloading ~400MB</div>}
     </div>
   );
 
@@ -96,9 +144,9 @@ await ModelManager.downloadModel('lfm2-350m-q4_k_m');
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: '13px', fontWeight: 600, color: '#92400E', marginBottom: '3px' }}>
-            AI Model Required
+            AI Model Required · SmolLM2 360M
           </div>
-          <div style={{ fontSize: '12px', color: '#9CA3AF' }}>250 MB · Downloads once · Cached locally forever</div>
+          <div style={{ fontSize: '12px', color: '#9CA3AF' }}>~400 MB · Downloads once · Cached locally forever</div>
         </div>
         <button onClick={download} className="btn" style={{ flexShrink: 0, padding: '9px 18px', fontSize: '13px' }}>
           ↓ Download Model
