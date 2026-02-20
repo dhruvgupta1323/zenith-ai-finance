@@ -2,180 +2,120 @@ import { ModelManager, ModelCategory } from '@runanywhere/web';
 import { TextGeneration } from '@runanywhere/web-llamacpp';
 import { db } from './db';
 
-// ─── GREETING / SMALL TALK DETECTION ─────────────────────────────────────────
-// If the user says "hii", "hello", "thanks" etc., don't dump financial data.
 const SMALL_TALK_PATTERNS = [
-  /^h+i+\s*$/i,           // hi, hii, hiii
-  /^h+e+l+o+\s*$/i,       // hello, helo
-  /^hey\s*$/i,
+  /^h+i+\s*$/i, /^h+e+l+o+\s*$/i, /^hey\s*$/i,
   /^good\s*(morning|evening|afternoon|night)/i,
-  /^thanks?\s*(you)?\s*$/i,
-  /^ok\s*$/i,
-  /^okay\s*$/i,
-  /^bye\s*$/i,
-  /^how are you/i,
-  /^what('s| is) up/i,
-  /^sup\s*$/i,
-  /^yo\s*$/i,
+  /^thanks?\s*(you)?\s*$/i, /^ok\s*$/i, /^okay\s*$/i,
+  /^bye\s*$/i, /^how are you/i, /^what('s| is) up/i,
+  /^sup\s*$/i, /^yo\s*$/i,
 ];
 
-const SMALL_TALK_REPLIES: string[] = [
+const SMALL_TALK_REPLIES = [
   "Hey! 👋 Ask me anything about your spending — like totals, recurring purchases, or category breakdowns.",
-  "Hi there! I'm your financial coach. Ask me about your expenses and I'll give you precise insights.",
-  "Hello! 💰 I'm ready to help. Try asking: 'What did I spend this month?' or 'Do I have recurring purchases?'",
-  "Hey! Ask me something like 'What's my total spending?' or 'Which category do I spend most on?'",
+  "Hi there! I'm your financial coach. Ask me about your expenses and I'll give precise insights.",
+  "Hello! 💰 Try asking: 'What did I spend this month?' or 'Which category costs most?'",
 ];
 
-function isSmallTalk(q: string): boolean {
-  return SMALL_TALK_PATTERNS.some(p => p.test(q.trim()));
-}
+function isSmallTalk(q: string) { return SMALL_TALK_PATTERNS.some(p => p.test(q.trim())); }
+function randomSmallTalkReply() { return SMALL_TALK_REPLIES[Math.floor(Math.random() * SMALL_TALK_REPLIES.length)]; }
 
-function randomSmallTalkReply(): string {
-  return SMALL_TALK_REPLIES[Math.floor(Math.random() * SMALL_TALK_REPLIES.length)];
-}
+// ── Yield to the browser event loop so UI stays responsive ──────────────────
+const yieldToMain = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 export const aiService = {
   isModelLoaded(): boolean {
     try {
-      const model = ModelManager.getLoadedModel(ModelCategory.Language);
-      return model !== null;
-    } catch {
-      return false;
-    }
+      return ModelManager.getLoadedModel(ModelCategory.Language) !== null;
+    } catch { return false; }
   },
 
-  async getAdvice(question: string): Promise<string> {
-    if (!this.isModelLoaded()) {
-      return "❌ Model not loaded! Please download the LLM model first.";
-    }
+  async getAdvice(question: string, onToken?: (token: string) => void): Promise<string> {
+    if (!this.isModelLoaded()) return "❌ Model not loaded! Please download the LLM model first.";
 
-    // ── Handle greetings without touching financial data ──────────────────────
     if (isSmallTalk(question)) {
-      return randomSmallTalkReply();
+      const reply = randomSmallTalkReply();
+      onToken?.(reply);
+      return reply;
     }
 
     try {
-      console.log('[AI] Question:', question);
+      // ── Yield before heavy DB work so UI can update first ────────────────
+      await yieldToMain();
 
-      const snapshot = await db.getAISnapshot();
+      const snapshot        = await db.getAISnapshot();
       const allTransactions = await db.getAll();
-      const recentTxns = allTransactions.slice(0, 10);
+      const recentTxns      = allTransactions.slice(0, 10);
 
       if (snapshot.transactionCount === 0) {
-        return "No expense data available yet. Add some transactions first!";
+        const msg = "No expense data yet. Add some transactions first!";
+        onToken?.(msg);
+        return msg;
       }
 
-      // ─── PRE-COMPUTE EVERYTHING — LLM MUST NOT DO MATH ───────────────────
-      const total30    = snapshot.last30Days.total;
-      const count30    = snapshot.last30Days.count;
-      const avg30      = snapshot.last30Days.avg;
-      const monthTotal = snapshot.monthlyTotal;
+      await yieldToMain(); // yield again before building prompts
 
-      // Transaction list using correct `item` field
+      const { total30, count30, avg30, monthTotal } = {
+        total30:    snapshot.last30Days.total,
+        count30:    snapshot.last30Days.count,
+        avg30:      snapshot.last30Days.avg,
+        monthTotal: snapshot.monthlyTotal,
+      };
+
       const txnLines = recentTxns
-        .map((t: Transaction, i: number) => {
-          const vendor = t.vendor ? ` at ${t.vendor}` : '';
-          return `${i + 1}. ${t.item}${vendor} [${t.category}]: $${t.amount}`;
-        })
+        .map((t: Transaction, i: number) => `${i + 1}. ${t.item}${t.vendor ? ` at ${t.vendor}` : ''} [${t.category}]: ₹${t.amount}`)
         .join('\n');
 
-      // Category breakdown
-      const catLines =
-        snapshot.categories.length === 0
-          ? 'None'
-          : snapshot.categories
-              .map((c: { category: string; amount: number; count: number }) => {
-                const s = c.count > 1 ? 's' : '';
-                return `  • ${c.category}: $${c.amount} (${c.count} transaction${s})`;
-              })
-              .join('\n');
+      const catLines = snapshot.categories.length === 0 ? 'None'
+        : snapshot.categories.map((c: any) => `  • ${c.category}: ₹${c.amount} (${c.count} txn${c.count > 1 ? 's' : ''})`).join('\n');
 
-      // Recurring — uses `name` field from updated db.ts
-      const recurringLines =
-        snapshot.recurring.length === 0
-          ? 'NONE — no repeated purchases detected'
-          : snapshot.recurring
-              .map((r: { name: string; count: number; total: number; avg: number; category: string }) => {
-                return `  • "${r.name}" [${r.category}] — bought ${r.count} times, total $${r.total}, avg $${r.avg} each`;
-              })
-              .join('\n');
+      const recurringLines = snapshot.recurring.length === 0
+        ? 'NONE — no repeated purchases detected'
+        : snapshot.recurring.map((r: any) => `  • "${r.name}" [${r.category}] — ${r.count}x, total ₹${r.total}, avg ₹${r.avg}`).join('\n');
 
-      // ─── KEYWORD DETECTION — inject pre-computed answer directly ─────────
-      // Small local LLMs will hallucinate math even when told not to.
-      // The safest fix: detect the question type and inject the exact answer,
-      // so the model just has to echo it back.
       const q = question.toLowerCase();
-
       let injectedFact = '';
 
-      if (
-        (q.includes('total') || q.includes('spent') || q.includes('spend') || q.includes('how much')) &&
-        (q.includes('month') || q.includes('30') || q.includes('last') || q.includes('overall'))
-      ) {
-        injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is exactly $${total30} across ${count30} transactions.`;
-
-      } else if (q.includes('how much') && !q.includes('month')) {
-        injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is $${total30}.`;
-
-      } else if (q.includes('recurring') || q.includes('repeat') || q.includes('regular') || q.includes('again')) {
-        if (snapshot.recurring.length === 0) {
-          injectedFact = `DIRECT ANSWER: There are NO recurring purchases in the last 90 days.`;
-        } else {
-          injectedFact = `DIRECT ANSWER: Yes, recurring purchases were found:\n${recurringLines}\nList all of them clearly.`;
-        }
-
-      } else if (q.includes('average') || q.includes('avg') || q.includes('per transaction')) {
-        injectedFact = `DIRECT ANSWER: The average spending per transaction is $${avg30}.`;
-
-      } else if (
-        q.includes('categor') || q.includes('most') || q.includes('top') ||
-        q.includes('where') || q.includes('breakdown')
-      ) {
+      if ((q.includes('total') || q.includes('spent') || q.includes('spend') || q.includes('how much')) &&
+          (q.includes('month') || q.includes('30') || q.includes('last') || q.includes('overall'))) {
+        injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is exactly ₹${total30} across ${count30} transactions.`;
+      } else if (q.includes('how much')) {
+        injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is ₹${total30}.`;
+      } else if (q.includes('recurring') || q.includes('repeat') || q.includes('regular')) {
+        injectedFact = snapshot.recurring.length === 0
+          ? 'DIRECT ANSWER: There are NO recurring purchases in the last 90 days.'
+          : `DIRECT ANSWER: Recurring purchases found:\n${recurringLines}`;
+      } else if (q.includes('average') || q.includes('avg')) {
+        injectedFact = `DIRECT ANSWER: Average spending per transaction is ₹${avg30}.`;
+      } else if (q.includes('categor') || q.includes('most') || q.includes('top') || q.includes('breakdown')) {
         injectedFact = `DIRECT ANSWER: Spending by category:\n${catLines}`;
-
       } else if (q.includes('how many') && q.includes('transaction')) {
         injectedFact = `DIRECT ANSWER: There are ${count30} transactions in the last 30 days.`;
-
-      } else if (q.includes('this month') || q.includes('current month') || q.includes('calendar')) {
-        injectedFact = `DIRECT ANSWER: Spending this calendar month is $${monthTotal}.`;
+      } else if (q.includes('this month') || q.includes('current month')) {
+        injectedFact = `DIRECT ANSWER: Spending this calendar month is ₹${monthTotal}.`;
       }
 
-      // ─── SYSTEM PROMPT ────────────────────────────────────────────────────
-      const systemPrompt = `You are a precise financial assistant. Answer the user's question using ONLY the verified data provided.
-
+      const systemPrompt = `You are a precise financial assistant. Use ONLY the verified data provided.
 RULES:
-1. NEVER do arithmetic. All numbers are pre-calculated.
-2. If a DIRECT ANSWER line is given, use those exact numbers in your reply.
-3. Answer in 2-3 sentences maximum.
-4. Do not speculate or add unsolicited advice.
-5. Do not repeat the word "DIRECT ANSWER" in your response.`;
+1. NEVER do arithmetic — all numbers are pre-calculated.
+2. If a DIRECT ANSWER line is given, use those exact numbers.
+3. Answer in 2-3 sentences max.
+4. Do not speculate. Use ₹ symbol for currency.`;
 
-      // ─── USER PROMPT ──────────────────────────────────────────────────────
-      const userPrompt = `VERIFIED FINANCIAL DATA — DO NOT RECALCULATE:
-
-[ LAST 30 DAYS ]
-Total spending: $${total30}
-Transactions: ${count30}
-Average per transaction: $${avg30}
-
-[ THIS CALENDAR MONTH ]
-Total: $${monthTotal}
-
+      const userPrompt = `VERIFIED FINANCIAL DATA:
+[ LAST 30 DAYS ] Total: ₹${total30} | Transactions: ${count30} | Avg: ₹${avg30}
+[ THIS MONTH ] Total: ₹${monthTotal}
 [ RECENT TRANSACTIONS ]
 ${txnLines}
-
 [ BY CATEGORY ]
 ${catLines}
-
-[ RECURRING PURCHASES (90-day window) ]
+[ RECURRING ]
 ${recurringLines}
-
 ${injectedFact ? `\n⚡ ${injectedFact}\n` : ''}
 USER QUESTION: "${question}"
+Answer in 2-3 sentences. No math.`;
 
-Answer using only the data above. 2-3 sentences max. No math.`;
-
-      console.log('[AI] injectedFact:', injectedFact || '(open question)');
+      // ── Yield one more time before firing the heavy LLM call ─────────────
+      await yieldToMain();
 
       const { stream, result } = await TextGeneration.generateStream(userPrompt, {
         maxTokens: 150,
@@ -184,24 +124,27 @@ Answer using only the data above. 2-3 sentences max. No math.`;
       });
 
       let response = '';
+      let tokenCount = 0;
+
       for await (const token of stream) {
         response += token;
+        onToken?.(token);
+        tokenCount++;
+
+        // ── Yield to browser every 8 tokens so UI stays live ─────────────
+        if (tokenCount % 8 === 0) {
+          await yieldToMain();
+        }
       }
 
       await result;
 
       const cleaned = response.trim();
+      if (!cleaned) return `Total spending in the last 30 days is ₹${total30} across ${count30} transaction${count30 !== 1 ? 's' : ''}.`;
 
-      if (!cleaned) {
-        return `Total spending for the last 30 days is $${total30} across ${count30} transaction${count30 !== 1 ? 's' : ''}.`;
-      }
-
-      // ─── HALLUCINATION GUARD ──────────────────────────────────────────────
-      // Catch patterns like "$400 × 3 = $1200" and replace with safe answer
-      const mathHallucination = /\$[\d,]+\s*[×x*]\s*\d+\s*[=≈]\s*\$[\d,]+/gi;
-      if (mathHallucination.test(cleaned)) {
-        console.warn('[AI] Math hallucination detected — using fallback.');
-        return `Total spending for the last 30 days is $${total30} across ${count30} transaction${count30 !== 1 ? 's' : ''}, with an average of $${avg30} per transaction.`;
+      // Hallucination guard
+      if (/₹[\d,]+\s*[×x*]\s*\d+\s*[=≈]\s*₹[\d,]+/gi.test(cleaned)) {
+        return `Total spending for the last 30 days is ₹${total30} across ${count30} transaction${count30 !== 1 ? 's' : ''}, avg ₹${avg30} each.`;
       }
 
       return cleaned;
@@ -213,79 +156,49 @@ Answer using only the data above. 2-3 sentences max. No math.`;
   },
 
   async getTip(): Promise<string> {
-    if (!this.isModelLoaded()) {
-      return "💡 Download the model to get personalized tips!";
-    }
+    if (!this.isModelLoaded()) return "💡 Download the model to get personalized tips!";
 
     try {
+      await yieldToMain();
       const snapshot = await db.getAISnapshot();
       const allTransactions = await db.getAll();
-      const recentTxns = allTransactions.slice(0, 5);
 
-      if (snapshot.transactionCount === 0) {
-        return "💡 Start logging expenses to receive personalized tips.";
-      }
+      if (snapshot.transactionCount === 0) return "💡 Start logging expenses to receive personalized tips.";
 
       const topCat  = snapshot.categories[0];
       const total30 = snapshot.last30Days.total;
 
-      // Use correct `item` field from Transaction model
-      const txnLines = recentTxns
-        .map((t: Transaction) => {
-          const vendor = t.vendor ? ` at ${t.vendor}` : '';
-          return `  • ${t.item}${vendor} [${t.category}]: $${t.amount}`;
-        })
+      const txnLines = allTransactions.slice(0, 5)
+        .map((t: Transaction) => `  • ${t.item}${t.vendor ? ` at ${t.vendor}` : ''} [${t.category}]: ₹${t.amount}`)
         .join('\n');
 
-      const topCatLines = snapshot.categories
-        .slice(0, 3)
-        .map((c: { category: string; amount: number }) => `  • ${c.category}: $${c.amount}`)
-        .join('\n');
+      const topCatLines = snapshot.categories.slice(0, 3)
+        .map((c: any) => `  • ${c.category}: ₹${c.amount}`).join('\n');
 
-      const prompt = `FINANCIAL DATA (do not recalculate):
+      const prompt = `Financial data (do not recalculate):
+Total last 30 days: ₹${total30}
+Top category: ${topCat?.category ?? 'N/A'} at ₹${topCat?.amount ?? 0}
+Recent: ${txnLines}
+Top categories: ${topCatLines}
+Give ONE actionable money-saving tip using the exact amounts. One sentence. Use ₹ symbol.`;
 
-Total spending last 30 days: $${total30}
-Highest category: ${topCat?.category ?? 'N/A'} at $${topCat?.amount ?? 0}
+      await yieldToMain();
 
-Recent transactions:
-${txnLines}
-
-Top categories:
-${topCatLines}
-
-Give ONE specific, actionable money-saving tip using the exact dollar amounts above. One sentence only.`;
-
-      const { stream, result } = await TextGeneration.generateStream(prompt, {
-        maxTokens: 80,
-        temperature: 0.2,
-      });
+      const { stream, result } = await TextGeneration.generateStream(prompt, { maxTokens: 80, temperature: 0.2 });
 
       let response = '';
-      for await (const token of stream) {
-        response += token;
-      }
-
+      for await (const token of stream) { response += token; }
       await result;
 
-      return (
-        response.trim() ||
-        `💡 Your top spending category is ${topCat?.category ?? 'unknown'} at $${topCat?.amount ?? 0} — consider setting a weekly limit for it.`
-      );
+      return response.trim() || `💡 Your top spending is ${topCat?.category ?? 'unknown'} at ₹${topCat?.amount ?? 0} — consider setting a weekly limit.`;
 
     } catch (err) {
-      console.error('[AI] Tip error:', err);
       return "💡 Keep tracking your expenses consistently.";
     }
   },
 };
 
-// ─── Local type alias so we don't need to re-import everywhere ───────────────
 type Transaction = {
-  id?: number;
-  amount: number;
-  category: string;
-  item: string;
-  vendor: string | null;
-  date: string;
-  createdAt?: string;
+  id?: number; amount: number; category: string;
+  item: string; vendor: string | null; date: string; createdAt?: string;
 };

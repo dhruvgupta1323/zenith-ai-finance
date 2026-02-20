@@ -1,83 +1,63 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { aiService } from '../services/ai';
 import { ModelManager, ModelCategory } from '@runanywhere/web';
 import ModelDownloader from './ModelDownloader';
 
+const SUGGESTIONS = [
+  "What's my total spending this month?",
+  "Which category costs me the most?",
+  "Do I have any recurring purchases?",
+  "How can I reduce my food budget?",
+];
+
 export default function CoachTab() {
-  const [msgs, setMsgs] = useState<Array<{ role: string; text: string }>>([]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [msgs, setMsgs]             = useState<Array<{ role: string; text: string }>>([]);
+  const [input, setInput]           = useState('');
+  const [isLoading, setIsLoading]   = useState(false);
   const [modelReady, setModelReady] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Continuously check if model is loaded
   useEffect(() => {
-    const checkModel = () => {
-      const model = ModelManager.getLoadedModel(ModelCategory.Language);
-      setModelReady(model !== null);
-      console.log('[Coach] Model ready:', model !== null);
-    };
-
-    checkModel();
-    const interval = setInterval(checkModel, 1000);
-    return () => clearInterval(interval);
+    const check = () => setModelReady(ModelManager.getLoadedModel(ModelCategory.Language) !== null);
+    check();
+    const iv = setInterval(check, 1000);
+    return () => clearInterval(iv);
   }, []);
 
-  const ask = async () => {
-    if (!input.trim()) return;
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [msgs]);
 
-    // Final check before asking
-    const isReady = aiService.isModelLoaded();
-    console.log('[Coach] Asking - Model ready:', isReady);
-
-    if (!isReady) {
-      alert('⏳ Model is still loading or not ready. Please wait a moment and try again.');
-      return;
-    }
-
-    const question = input.trim();
+  const ask = async (question?: string) => {
+    const q = question ?? input.trim();
+    if (!q || !modelReady || isLoading) return;
     setInput('');
-
-    // add user message and a placeholder for coach
-    setMsgs(prev => [...prev, { role: 'user', text: question }, { role: 'coach', text: '🤔 Thinking...' }]);
+    setMsgs(prev => [...prev, { role: 'user', text: q }, { role: 'coach', text: '...' }]);
     setIsLoading(true);
+    await new Promise(r => setTimeout(r, 50));
 
-    // streaming callback that appends tokens to the last message
     const handleToken = (token: string) => {
       setMsgs(prev => {
         const updated = [...prev];
-        if (updated.length > 0) {
-          const last = updated[updated.length - 1];
-          // if placeholder still present, replace it; otherwise append
-          const newText = last.text === '🤔 Thinking...' ? token : last.text + token;
-          updated[updated.length - 1] = { role: 'coach', text: newText };
+        const last = updated[updated.length - 1];
+        if (last?.role === 'coach') {
+          updated[updated.length - 1] = { role: 'coach', text: last.text === '...' ? token : last.text + token };
         }
         return updated;
       });
     };
 
     try {
-      console.log('[Coach] Asking:', question);
-      const response = await aiService.getAdvice(question, handleToken);
-      console.log('[Coach] Got response:', response);
-
-      // final update (in case streaming didn't finish exactly)
+      const response = await aiService.getAdvice(q, handleToken);
       setMsgs(prev => {
         const updated = [...prev];
-        if (updated.length > 0) {
-          updated[updated.length - 1] = { role: 'coach', text: response };
-        }
+        if (updated.length > 0) updated[updated.length - 1] = { role: 'coach', text: response };
         return updated;
       });
     } catch (err) {
-      console.error('[Coach] Error:', err);
       setMsgs(prev => {
         const updated = [...prev];
-        if (updated.length > 0) {
-          updated[updated.length - 1] = {
-            role: 'coach',
-            text: '❌ Error: ' + (err instanceof Error ? err.message : 'Unknown error'),
-          };
-        }
+        if (updated.length > 0) updated[updated.length - 1] = { role: 'coach', text: '❌ ' + (err instanceof Error ? err.message : 'Error') };
         return updated;
       });
     } finally {
@@ -85,123 +65,139 @@ export default function CoachTab() {
     }
   };
 
-  const suggestions = [
-    "Can I afford a $500 laptop?",
-    "What are my top spending categories?",
-    "How can I save money this month?",
-    "Should I reduce my food budget?",
-  ];
-
   return (
-    <div>
-      <ModelDownloader />
-      
-      <div className="card">
-        <h2>💬 Financial Coach</h2>
-        <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '16px' }}>
-          Ask me about your spending. I'll give personalized advice based on your actual data.
-        </p>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)' }}>
 
-        <div style={{ 
-          minHeight: '280px', 
-          maxHeight: '380px', 
-          overflow: 'auto', 
-          background: 'rgba(0,0,0,0.2)', 
-          borderRadius: '8px', 
-          padding: '12px', 
-          marginBottom: '12px', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '10px' 
-        }}>
-          {msgs.length === 0 ? (
-            <div style={{ color: 'var(--muted)', margin: 'auto', textAlign: 'center', fontSize: '14px' }}>
-              <div style={{ fontSize: '40px', marginBottom: '8px' }}>💰</div>
-              <p>Ask your financial coach...</p>
-              {!modelReady && <p style={{ fontSize: '12px', marginTop: '8px', color: '#ef4444' }}>⏳ Waiting for model...</p>}
-            </div>
-          ) : (
-            msgs.map((m, i) => (
-              <div key={i} style={{ 
-                padding: '12px', 
-                borderRadius: '8px',
-                background: m.role === 'user' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)',
-                borderLeft: `3px solid ${m.role === 'user' ? '#3b82f6' : '#10b981'}`,
-              }}>
-                <strong style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-                  {m.role === 'user' ? '👤 You' : '🤖 Coach'}
-                </strong>
-                <p style={{ lineHeight: '1.5', fontSize: '14px' }}>{m.text}</p>
-              </div>
-            ))
-          )}
-          {isLoading && (
-            <div style={{ 
-              padding: '12px', 
-              color: 'var(--muted)',
-              fontSize: '13px',
-              textAlign: 'center',
-              fontStyle: 'italic'
+      {/* Top section: page title area */}
+      <div style={{ padding: '28px 32px 0', flexShrink: 0 }}>
+        <ModelDownloader />
+      </div>
+
+      {/* Middle: chat area */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {msgs.length === 0 ? (
+          /* Empty / centered state */
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 32px', textAlign: 'center' }}>
+            <div style={{
+              width: '80px', height: '80px', borderRadius: '24px',
+              background: 'linear-gradient(135deg, #10B981, #059669)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: '28px', boxShadow: '0 12px 40px rgba(16,185,129,0.35)',
             }}>
-              ⏳ Coach is analyzing your finances...
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
             </div>
-          )}
-        </div>
+            <h2 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text)', marginBottom: '10px', letterSpacing: '-0.4px' }}>
+              Ask me about your finances
+            </h2>
+            <p style={{ fontSize: '14px', color: 'var(--muted)', maxWidth: '380px', lineHeight: 1.7, marginBottom: '36px' }}>
+              I'll analyze your spending patterns and give you personalized advice
+            </p>
 
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-          <input 
-            value={input} 
-            onChange={(e) => setInput(e.target.value)} 
-            placeholder={modelReady ? "Ask a question..." : "Waiting for model..."} 
-            onKeyPress={(e) => e.key === 'Enter' && !isLoading && modelReady && ask()} 
-            disabled={isLoading || !modelReady}
-            style={{ opacity: modelReady ? 1 : 0.5 }}
-          />
-          <button 
-            className="btn" 
-            onClick={ask} 
-            disabled={isLoading || !input.trim() || !modelReady}
-            style={{ padding: '10px 16px' }}
-          >
-            {isLoading ? '⏳' : '→'}
-          </button>
-        </div>
+            {modelReady && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', maxWidth: '580px', width: '100%' }}>
+                {SUGGESTIONS.map((s, i) => (
+                  <button key={i} className="chip" onClick={() => ask(s)}>
+                    <span className="chip-arrow">→</span>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
 
-        {!modelReady && (
-          <div style={{ padding: '12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', fontSize: '13px', color: 'var(--muted)', textAlign: 'center' }}>
-            ⬆️ Download the model above first to start chatting
+            {!modelReady && (
+              <p style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '8px' }}>Download a model above to get started</p>
+            )}
           </div>
-        )}
-
-        {msgs.length === 0 && modelReady && (
-          <div style={{ padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-            <strong style={{ fontSize: '12px' }}>💡 Try asking:</strong>
-            <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => setInput(s)}
-                  style={{
-                    padding: '8px',
-                    background: 'rgba(16, 185, 129, 0.1)',
-                    border: '1px solid rgba(16, 185, 129, 0.3)',
-                    borderRadius: '6px',
-                    color: 'var(--primary)',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    textAlign: 'left',
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseOver={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.2)'}
-                  onMouseOut={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.1)'}
-                >
-                  → {s}
-                </button>
-              ))}
-            </div>
+        ) : (
+          /* Message thread */
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {msgs.map((m, i) => (
+              <div key={i} style={{
+                display: 'flex',
+                flexDirection: m.role === 'user' ? 'row-reverse' : 'row',
+                gap: '10px', alignItems: 'flex-start',
+              }}>
+                {m.role === 'coach' && (
+                  <div style={{
+                    width: '34px', height: '34px', borderRadius: '10px', flexShrink: 0,
+                    background: 'linear-gradient(135deg, #10B981, #059669)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '2px',
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                  </div>
+                )}
+                <div style={{
+                  maxWidth: '78%', padding: '13px 18px', borderRadius: '16px',
+                  background: m.role === 'user' ? '#0D1117' : '#FFFFFF',
+                  color: m.role === 'user' ? '#fff' : 'var(--text)',
+                  fontSize: '14px', lineHeight: 1.65, whiteSpace: 'pre-wrap',
+                  boxShadow: m.role === 'coach' ? '0 1px 6px rgba(0,0,0,0.07)' : 'none',
+                  border: m.role === 'coach' ? '1px solid #F3F4F6' : 'none',
+                  borderBottomRightRadius: m.role === 'user' ? '4px' : '16px',
+                  borderBottomLeftRadius: m.role === 'coach' ? '4px' : '16px',
+                }}>
+                  {m.text === '...' ? (
+                    <span style={{ display: 'flex', gap: '4px', alignItems: 'center', padding: '2px 0' }}>
+                      {[0,1,2].map(j => (
+                        <span key={j} style={{
+                          width: '6px', height: '6px', borderRadius: '50%', background: 'var(--primary)',
+                          display: 'inline-block',
+                          animation: `bounce 0.9s ${j*0.15}s ease-in-out infinite`,
+                        }}/>
+                      ))}
+                    </span>
+                  ) : m.text}
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef}/>
           </div>
         )}
       </div>
+
+      {/* Sticky bottom input */}
+      <div className="coach-input-bar">
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '14px', padding: '4px 6px 4px 18px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder={modelReady ? 'Ask about your spending...' : 'Download model to start...'}
+            onKeyDown={e => e.key === 'Enter' && !isLoading && modelReady && ask()}
+            disabled={isLoading || !modelReady}
+            style={{
+              flex: 1, border: 'none', background: 'transparent', padding: '10px 0',
+              fontSize: '14px', color: 'var(--text)', outline: 'none',
+              opacity: modelReady ? 1 : 0.5, width: '100%',
+            }}
+          />
+          <button
+            onClick={() => ask()}
+            disabled={isLoading || !input.trim() || !modelReady}
+            style={{
+              width: '40px', height: '40px', borderRadius: '10px',
+              background: !input.trim() || !modelReady ? '#E5E7EB' : 'linear-gradient(135deg, #10B981, #059669)',
+              border: 'none', cursor: (!input.trim() || !modelReady) ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              transition: 'all 0.18s',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={!input.trim() || !modelReady ? '#9CA3AF' : '#fff'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); opacity: 0.4; }
+          50% { transform: translateY(-5px); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
