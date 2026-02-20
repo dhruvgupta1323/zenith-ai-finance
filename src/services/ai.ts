@@ -2,6 +2,30 @@ import { ModelManager, ModelCategory } from '@runanywhere/web';
 import { TextGeneration } from '@runanywhere/web-llamacpp';
 import { db } from './db';
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────────────────────
+interface Transaction {
+  id?: number;
+  amount: number;
+  category: string;
+  item: string;
+  vendor: string | null;
+  date: string;
+  createdAt?: string;
+}
+
+interface AISnapshot {
+  last30Days: { total: number; count: number; avg: number };
+  monthlyTotal: number;
+  categories: Array<{ category: string; amount: number; count: number }>;
+  recurring: Array<{ name: string; category: string; total: number; avg: number; count: number }>;
+  transactionCount: number;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Constants - Pre-defined patterns for fast responses
+// ──────────────────────────────────────────────────────────────────────────────
 const SMALL_TALK_PATTERNS = [
   /^h+i+\s*$/i, /^h+e+l+o+\s*$/i, /^hey\s*$/i,
   /^good\s*(morning|evening|afternoon|night)/i,
@@ -16,37 +40,98 @@ const SMALL_TALK_REPLIES = [
   "Hello! 💰 Try asking: 'What did I spend this month?' or 'Which category costs most?'",
 ];
 
-function isSmallTalk(q: string) { return SMALL_TALK_PATTERNS.some(p => p.test(q.trim())); }
-function randomSmallTalkReply() { return SMALL_TALK_REPLIES[Math.floor(Math.random() * SMALL_TALK_REPLIES.length)]; }
-
-// ── Yield to the browser event loop so UI stays responsive ──────────────────
-const yieldToMain = (): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, 0));
-
-// ── Cache for AI snapshot to avoid repeated DB queries ──────────────────────
-let cachedSnapshot: any = null;
-let snapshotCacheTime = 0;
-const SNAPSHOT_CACHE_TTL = 30000; // 30 seconds cache
-
-async function getCachedSnapshot() {
-  const now = Date.now();
-  if (cachedSnapshot && (now - snapshotCacheTime) < SNAPSHOT_CACHE_TTL) {
-    return cachedSnapshot;
-  }
-  cachedSnapshot = await db.getAISnapshot();
-  snapshotCacheTime = now;
-  return cachedSnapshot;
+// ──────────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ──────────────────────────────────────────────────────────────────────────────
+function isSmallTalk(query: string): boolean {
+  return SMALL_TALK_PATTERNS.some(pattern => pattern.test(query.trim()));
 }
 
+function randomSmallTalkReply(): string {
+  return SMALL_TALK_REPLIES[Math.floor(Math.random() * SMALL_TALK_REPLIES.length)];
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Performance: Smart Yield Function
+// Allows UI to update during heavy processing
+// ──────────────────────────────────────────────────────────────────────────────
+function createYieldFunction(interval: number = 10) {
+  let counter = 0;
+  return () => {
+    counter++;
+    if (counter >= interval) {
+      counter = 0;
+      return new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+    return Promise.resolve();
+  };
+}
+
+const yieldEveryN = createYieldFunction(8);
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Caching - Avoid repeated expensive DB queries
+// ──────────────────────────────────────────────────────────────────────────────
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+class AICache {
+  private snapshot: CacheEntry<AISnapshot> | null = null;
+  private readonly TTL = 30000; // 30 seconds
+
+  async getSnapshot(): Promise<AISnapshot> {
+    const now = Date.now();
+    if (this.snapshot && (now - this.snapshot.timestamp) < this.TTL) {
+      return this.snapshot.data;
+    }
+    
+    this.snapshot = {
+      data: await db.getAISnapshot(),
+      timestamp: now,
+    };
+    return this.snapshot.data;
+  }
+
+  invalidate(): void {
+    this.snapshot = null;
+  }
+}
+
+const aiCache = new AICache();
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Main AI Service
+// ──────────────────────────────────────────────────────────────────────────────
 export const aiService = {
+  /**
+   * Check if the LLM model is loaded and ready
+   */
   isModelLoaded(): boolean {
     try {
-      return ModelManager.getLoadedModel(ModelCategory.Language) !== null;
-    } catch { return false; }
+      const model = ModelManager.getLoadedModel(ModelCategory.Language);
+      return model !== null && model !== undefined;
+    } catch {
+      console.warn('[AI] Model check failed - SDK may not be initialized');
+      return false;
+    }
   },
 
+  /**
+   * Main method to get financial advice from AI
+   * @param question - User's question
+   * @param onToken - Optional callback for streaming tokens (UI updates)
+   */
   async getAdvice(question: string, onToken?: (token: string) => void): Promise<string> {
-    if (!this.isModelLoaded()) return "❌ Model not loaded! Please download the LLM model first.";
+    // ── Validate model is loaded ───────────────────────────────────────────
+    if (!this.isModelLoaded()) {
+      const msg = "❌ Model not loaded! Please download the LLM model first.";
+      onToken?.(msg);
+      return msg;
+    }
 
+    // ── Handle small talk with instant response ─────────────────────────────
     if (isSmallTalk(question)) {
       const reply = randomSmallTalkReply();
       onToken?.(reply);
@@ -54,166 +139,228 @@ export const aiService = {
     }
 
     try {
-      // ── Yield before heavy DB work so UI can update first ────────────────
-      await yieldToMain();
+      // ── Yield to let UI update ───────────────────────────────────────────
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
 
-      const snapshot        = await db.getAISnapshot();
+      // ── Get cached data (avoids repeated DB queries) ─────────────────────
+      const snapshot = await aiCache.getSnapshot();
       const allTransactions = await db.getAll();
-      const recentTxns      = allTransactions.slice(0, 10);
+      const recentTxns = allTransactions.slice(0, 10);
 
+      // ── Handle empty data ─────────────────────────────────────────────────
       if (snapshot.transactionCount === 0) {
-        const msg = "No expense data yet. Add some transactions first!";
+        const msg = "📝 No expense data yet. Add some transactions first to get personalized insights!";
         onToken?.(msg);
         return msg;
       }
 
-      await yieldToMain(); // yield again before building prompts
+      // ── Yield again before building prompt ─────────────────────────────────
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
 
+      // ── Extract key metrics ───────────────────────────────────────────────
       const { total30, count30, avg30, monthTotal } = {
-        total30:    snapshot.last30Days.total,
-        count30:    snapshot.last30Days.count,
-        avg30:      snapshot.last30Days.avg,
+        total30: snapshot.last30Days.total,
+        count30: snapshot.last30Days.count,
+        avg30: snapshot.last30Days.avg,
         monthTotal: snapshot.monthlyTotal,
       };
 
+      // ── Format transaction data for prompt ────────────────────────────────
       const txnLines = recentTxns
-        .map((t: Transaction, i: number) => `${i + 1}. ${t.item}${t.vendor ? ` at ${t.vendor}` : ''} [${t.category}]: ₹${t.amount}`)
+        .map((t: Transaction, i: number) => 
+          `${i + 1}. ${t.item}${t.vendor ? ` at ${t.vendor}` : ''} [${t.category}]: ₹${t.amount}`
+        )
         .join('\n');
 
-      const catLines = snapshot.categories.length === 0 ? 'None'
-        : snapshot.categories.map((c: any) => `  • ${c.category}: ₹${c.amount} (${c.count} txn${c.count > 1 ? 's' : ''})`).join('\n');
+      // ── Format category data ───────────────────────────────────────────────
+      const catLines = snapshot.categories.length === 0 
+        ? 'None recorded' 
+        : snapshot.categories
+            .slice(0, 5)
+            .map((c: any) => `  • ${c.category}: ₹${c.amount} (${c.count} transactions)`)
+            .join('\n');
 
+      // ── Format recurring data ──────────────────────────────────────────────
       const recurringLines = snapshot.recurring.length === 0
-        ? 'NONE — no repeated purchases detected'
-        : snapshot.recurring.map((r: any) => `  • "${r.name}" [${r.category}] — ${r.count}x, total ₹${r.total}, avg ₹${r.avg}`).join('\n');
+        ? 'No recurring purchases detected'
+        : snapshot.recurring
+            .slice(0, 5)
+            .map((r: any) => `  • "${r.name}" [${r.category}] - ${r.count}x, ₹${r.total} total`)
+            .join('\n');
 
+      // ── Detect question intent and inject direct answers ───────────────────
       const q = question.toLowerCase();
       let injectedFact = '';
 
-      if ((q.includes('total') || q.includes('spent') || q.includes('spend') || q.includes('how much')) &&
-          (q.includes('month') || q.includes('30') || q.includes('last') || q.includes('overall'))) {
-        injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is exactly ₹${total30} across ${count30} transactions.`;
-      } else if (q.includes('how much')) {
-        injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is ₹${total30}.`;
-      } else if (q.includes('recurring') || q.includes('repeat') || q.includes('regular')) {
-        injectedFact = snapshot.recurring.length === 0
-          ? 'DIRECT ANSWER: There are NO recurring purchases in the last 90 days.'
-          : `DIRECT ANSWER: Recurring purchases found:\n${recurringLines}`;
-      } else if (q.includes('average') || q.includes('avg')) {
-        injectedFact = `DIRECT ANSWER: Average spending per transaction is ₹${avg30}.`;
-      } else if (q.includes('categor') || q.includes('most') || q.includes('top') || q.includes('breakdown')) {
-        injectedFact = `DIRECT ANSWER: Spending by category:\n${catLines}`;
-      } else if (q.includes('how many') && q.includes('transaction')) {
-        injectedFact = `DIRECT ANSWER: There are ${count30} transactions in the last 30 days.`;
-      } else if (q.includes('this month') || q.includes('current month')) {
-        injectedFact = `DIRECT ANSWER: Spending this calendar month is ₹${monthTotal}.`;
-      }
+      const detectIntent = () => {
+        // Total spending question
+        if (q.includes('total') || q.includes('spent') || q.includes('spend') || q.includes('how much')) {
+          if (q.includes('month') || q.includes('30') || q.includes('last') || q.includes('overall') || q.includes('this')) {
+            injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is exactly ₹${total30} across ${count30} transactions.`;
+            return;
+          }
+          injectedFact = `DIRECT ANSWER: Total spending in the last 30 days is ₹${total30}.`;
+          return;
+        }
+        
+        // Recurring purchases
+        if (q.includes('recurring') || q.includes('repeat') || q.includes('regular') || q.includes('subscription')) {
+          injectedFact = snapshot.recurring.length === 0
+            ? 'DIRECT ANSWER: No recurring purchases detected in the last 90 days.'
+            : `DIRECT ANSWER: Recurring purchases:\n${recurringLines}`;
+          return;
+        }
+        
+        // Average spending
+        if (q.includes('average') || q.includes('avg') || q.includes('mean')) {
+          injectedFact = `DIRECT ANSWER: Average spending per transaction is ₹${avg30}.`;
+          return;
+        }
+        
+        // Category breakdown
+        if (q.includes('categor') || q.includes('most') || q.includes('top') || q.includes('breakdown') || q.includes('where')) {
+          injectedFact = `DIRECT ANSWER: Spending by category:\n${catLines}`;
+          return;
+        }
+        
+        // Transaction count
+        if (q.includes('how many') && (q.includes('transaction') || q.includes('purchase') || q.includes('expense'))) {
+          injectedFact = `DIRECT ANSWER: You have ${count30} transactions in the last 30 days.`;
+          return;
+        }
+        
+        // This month
+        if (q.includes('this month') || q.includes('current month')) {
+          injectedFact = `DIRECT ANSWER: Spending this calendar month is ₹${monthTotal}.`;
+          return;
+        }
+      };
+      
+      detectIntent();
 
-      const systemPrompt = `You are a precise financial assistant. Use ONLY the verified data provided.
+      // ── Build optimized prompt ─────────────────────────────────────────────
+      const systemPrompt = `You are FinAI, a precise financial assistant.
 RULES:
-1. NEVER do arithmetic — all numbers are pre-calculated.
-2. If a DIRECT ANSWER line is given, use those exact numbers.
-3. Answer in 2-3 sentences max.
-4. Do not speculate. Use ₹ symbol for currency.`;
+1. NEVER perform arithmetic - use only the pre-calculated numbers provided
+2. If a DIRECT ANSWER is provided, use those exact figures
+3. Keep responses concise (2-3 sentences max)
+4. Use ₹ symbol for Indian Rupees
+5. Be helpful and actionable with advice`;
 
-      const userPrompt = `VERIFIED FINANCIAL DATA:
-[ LAST 30 DAYS ] Total: ₹${total30} | Transactions: ${count30} | Avg: ₹${avg30}
-[ THIS MONTH ] Total: ₹${monthTotal}
-[ RECENT TRANSACTIONS ]
+      const userPrompt = `📊 YOUR FINANCIAL DATA (Verified):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Last 30 Days: ₹${total30} | ${count30} transactions | Avg: ₹${avg30}
+📆 This Month: ₹${monthTotal}
+
+🛒 Recent Transactions:
 ${txnLines}
-[ BY CATEGORY ]
+
+📁 By Category:
 ${catLines}
-[ RECURRING ]
+
+🔄 Recurring:
 ${recurringLines}
-${injectedFact ? `\n⚡ ${injectedFact}\n` : ''}
-USER QUESTION: "${question}"
-Answer in 2-3 sentences. No math.`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${injectedFact ? `⚡ ${injectedFact}\n` : ''}
+❓ Question: "${question}"
 
-      // ── Yield one more time before firing the heavy LLM call ─────────────
-      await yieldToMain();
+💡 Provide a helpful, concise answer based on the data above.`;
 
-      const { stream, result } = await TextGeneration.generateStream(userPrompt, {
+      // ── Yield before LLM call ────────────────────────────────────────────
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+      // ── Generate response with streaming ───────────────────────────────────
+      const llmResult = await TextGeneration.generateStream(userPrompt, {
         maxTokens: 150,
         temperature: 0.1,
+        topP: 0.9,
         systemPrompt,
       });
 
       let response = '';
-      let tokenCount = 0;
 
-      for await (const token of stream) {
+      for await (const token of llmResult.stream) {
         response += token;
         onToken?.(token);
-        tokenCount++;
-
-        // ── Yield to browser every 8 tokens so UI stays live ─────────────
-        if (tokenCount % 8 === 0) {
-          await yieldToMain();
-        }
+        
+        // Yield periodically to prevent UI freeze
+        await yieldEveryN();
       }
 
-      await result;
+      await llmResult.result;
 
+      // ── Clean and validate response ────────────────────────────────────────
       const cleaned = response.trim();
-      if (!cleaned) return `Total spending in the last 30 days is ₹${total30} across ${count30} transaction${count30 !== 1 ? 's' : ''}.`;
+      
+      if (!cleaned) {
+        return `💰 Your total spending in the last 30 days is ₹${total30} across ${count30} transactions.`;
+      }
 
-      // Hallucination guard
-      if (/₹[\d,]+\s*[×x*]\s*\d+\s*[=≈]\s*₹[\d,]+/gi.test(cleaned)) {
-        return `Total spending for the last 30 days is ₹${total30} across ${count30} transaction${count30 !== 1 ? 's' : ''}, avg ₹${avg30} each.`;
+      // Hallucination guard - prevent math errors
+      if (/₹[\d,]+\s*[×x*+\-÷/]\s*\d+\s*[=≈]\s*₹[\d,]+/gi.test(cleaned)) {
+        return `💰 Your total spending in the last 30 days is ₹${total30} across ${count30} transactions, averaging ₹${avg30} each.`;
       }
 
       return cleaned;
 
     } catch (err) {
-      console.error('[AI] Error:', err);
-      return `⚠️ AI Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+      console.error('[AI] Error in getAdvice:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      return `⚠️ AI Error: ${errorMsg}. Please try again.`;
     }
   },
 
+  /**
+   * Get a quick financial tip
+   */
   async getTip(): Promise<string> {
-    if (!this.isModelLoaded()) return "💡 Download the model to get personalized tips!";
+    if (!this.isModelLoaded()) {
+      return "💡 Download the model to get personalized tips!";
+    }
 
     try {
-      await yieldToMain();
-      const snapshot = await db.getAISnapshot();
-      const allTransactions = await db.getAll();
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      
+      const snapshot = await aiCache.getSnapshot();
 
-      if (snapshot.transactionCount === 0) return "💡 Start logging expenses to receive personalized tips.";
+      if (snapshot.transactionCount === 0) {
+        return "💡 Start logging expenses to receive personalized tips.";
+      }
 
-      const topCat  = snapshot.categories[0];
+      const topCat = snapshot.categories[0];
       const total30 = snapshot.last30Days.total;
 
-      const txnLines = allTransactions.slice(0, 5)
-        .map((t: Transaction) => `  • ${t.item}${t.vendor ? ` at ${t.vendor}` : ''} [${t.category}]: ₹${t.amount}`)
-        .join('\n');
+      const prompt = `You are a financial advisor. Based on this data:
+- Total spending last 30 days: ₹${total30}
+- Top category: ${topCat?.category ?? 'N/A'} at ₹${topCat?.amount ?? 0}
 
-      const topCatLines = snapshot.categories.slice(0, 3)
-        .map((c: any) => `  • ${c.category}: ₹${c.amount}`).join('\n');
+Give ONE short, actionable money-saving tip. Be specific with amounts. Use ₹ symbol.`;
 
-      const prompt = `Financial data (do not recalculate):
-Total last 30 days: ₹${total30}
-Top category: ${topCat?.category ?? 'N/A'} at ₹${topCat?.amount ?? 0}
-Recent: ${txnLines}
-Top categories: ${topCatLines}
-Give ONE actionable money-saving tip using the exact amounts. One sentence. Use ₹ symbol.`;
-
-      await yieldToMain();
-
-      const { stream, result } = await TextGeneration.generateStream(prompt, { maxTokens: 80, temperature: 0.2 });
+      const llmResult = await TextGeneration.generateStream(prompt, {
+        maxTokens: 60,
+        temperature: 0.2,
+      });
 
       let response = '';
-      for await (const token of stream) { response += token; }
-      await result;
+      for await (const token of llmResult.stream) {
+        response += token;
+        await yieldEveryN();
+      }
+      await llmResult.result;
 
-      return response.trim() || `💡 Your top spending is ${topCat?.category ?? 'unknown'} at ₹${topCat?.amount ?? 0} — consider setting a weekly limit.`;
+      const trimmed = response.trim();
+      return trimmed || `💡 Your top spending is ${topCat?.category ?? 'unknown'} at ₹${topCat?.amount ?? 0} — consider setting a weekly budget.`;
 
     } catch (err) {
-      return "💡 Keep tracking your expenses consistently.";
+      console.error('[AI] Error in getTip:', err);
+      return "💡 Keep tracking your expenses consistently for better insights.";
     }
   },
-};
 
-type Transaction = {
-  id?: number; amount: number; category: string;
-  item: string; vendor: string | null; date: string; createdAt?: string;
+  /**
+   * Invalidate cache when new data is added
+   */
+  refreshData(): void {
+    aiCache.invalidate();
+  },
 };
