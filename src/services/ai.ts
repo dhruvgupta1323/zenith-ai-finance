@@ -20,7 +20,22 @@ function isSmallTalk(q: string) { return SMALL_TALK_PATTERNS.some(p => p.test(q.
 function randomSmallTalkReply() { return SMALL_TALK_REPLIES[Math.floor(Math.random() * SMALL_TALK_REPLIES.length)]; }
 
 // ── Yield to the browser event loop so UI stays responsive ──────────────────
-const yieldToMain = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+const yieldToMain = (): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+// ── Cache for AI snapshot to avoid repeated DB queries ──────────────────────
+let cachedSnapshot: any = null;
+let snapshotCacheTime = 0;
+const SNAPSHOT_CACHE_TTL = 30000; // 30 seconds cache
+
+async function getCachedSnapshot() {
+  const now = Date.now();
+  if (cachedSnapshot && (now - snapshotCacheTime) < SNAPSHOT_CACHE_TTL) {
+    return cachedSnapshot;
+  }
+  cachedSnapshot = await db.getAISnapshot();
+  snapshotCacheTime = now;
+  return cachedSnapshot;
+}
 
 export const aiService = {
   isModelLoaded(): boolean {

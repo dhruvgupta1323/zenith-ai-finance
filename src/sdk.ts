@@ -3,6 +3,7 @@ import { LlamaCPP } from '@runanywhere/web-llamacpp';
 import { ONNX } from '@runanywhere/web-onnx';
 import type { AccelerationMode } from '@runanywhere/web';
 
+// Using LFM2 350M - proven to work with RunAnywhere
 const MODELS: CompactModelDef[] = [
   {
     id: 'lfm2-350m-q4_k_m',
@@ -23,11 +24,11 @@ export async function initSDK(): Promise<void> {
   
   _init = (async () => {
     try {
-      console.log('[SDK] Initializing without VLM/Vision...');
+      console.log('[SDK] Initializing with LFM2 350M...');
       
       await RunAnywhere.initialize({ 
         environment: SDKEnvironment.Development, 
-        debug: false,
+        debug: true,
       });
 
       EventBus.shared.on('llamacpp.wasmLoaded', (evt: any) => { 
@@ -42,10 +43,8 @@ export async function initSDK(): Promise<void> {
       console.log('[SDK] ✓ Voice backend registered');
 
       RunAnywhere.registerModels(MODELS);
-      console.log('[SDK] ✓ Models registered (LLM only)');
+      console.log('[SDK] ✓ Models registered: LFM2 350M');
 
-      // Explicitly disable VLM to prevent image.png errors
-      console.log('[SDK] VLM disabled - Finance only mode');
     } catch (error) {
       console.error('[SDK] Initialization error:', error);
       throw error;

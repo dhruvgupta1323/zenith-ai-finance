@@ -36,15 +36,33 @@ export default function CoachTab() {
     setIsLoading(true);
     await new Promise(r => setTimeout(r, 50));
 
+    // Use a ref to accumulate tokens and batch UI updates to prevent lag
+    const responseRef = { current: '' };
+    let updatePending = false;
+
+    const flushTokens = () => {
+      if (responseRef.current) {
+        setMsgs(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'coach') {
+            updated[updated.length - 1] = { role: 'coach', text: last.text + responseRef.current };
+          }
+          return updated;
+        });
+        responseRef.current = '';
+        updatePending = false;
+      }
+    };
+
     const handleToken = (token: string) => {
-      setMsgs(prev => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === 'coach') {
-          updated[updated.length - 1] = { role: 'coach', text: last.text === '...' ? token : last.text + token };
-        }
-        return updated;
-      });
+      responseRef.current += token;
+      
+      // Only update UI periodically to reduce re-renders and prevent page freeze
+      if (!updatePending) {
+        updatePending = true;
+        setTimeout(flushTokens, 50);
+      }
     };
 
     try {
