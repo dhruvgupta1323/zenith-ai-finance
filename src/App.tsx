@@ -71,7 +71,6 @@ export function App() {
       .catch(err => setError(err.message));
   }, []);
 
-  // Close mobile menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (mobileMenuOpen && sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
@@ -81,20 +80,18 @@ export function App() {
         }
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [mobileMenuOpen]);
 
-  // Close mobile menu when changing tabs
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
     setMobileMenuOpen(false);
   };
 
   const clearAllData = () => {
-    localStorage.removeItem('zenith-txns');
-    localStorage.removeItem('zenith-manual-bills');
+    localStorage.removeItem('finex-txns');
+    localStorage.removeItem('finex-manual-bills');
     location.reload();
   };
 
@@ -119,8 +116,8 @@ export function App() {
     <div className="app-shell">
 
       {/* Mobile Navigation Toggle */}
-      <button 
-        className="mobile-nav-toggle" 
+      <button
+        className="mobile-nav-toggle"
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         aria-label="Toggle navigation menu"
       >
@@ -134,28 +131,29 @@ export function App() {
       </button>
 
       {/* Mobile Overlay */}
-      <div 
+      <div
         className={`mobile-nav-overlay ${mobileMenuOpen ? 'visible' : ''}`}
         onClick={() => setMobileMenuOpen(false)}
       />
 
       {/* ── Sidebar ── */}
-      <aside 
+      <aside
         ref={sidebarRef}
         className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileMenuOpen ? 'mobile-open' : ''}`}
       >
 
         {/* Logo */}
         <div className="sidebar-logo">
-          <div className="logo-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" fill="white"/>
-              <path d="M13 13l6 6" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
-            </svg>
+          <div className="logo-icon" style={{ background: 'transparent', padding: 0, borderRadius: '10px', overflow: 'hidden' }}>
+            <img
+              src="/finex-logo.png"
+              alt="Finex AI"
+              style={{ width: '36px', height: '36px', borderRadius: '10px', objectFit: 'cover', display: 'block' }}
+            />
           </div>
           {!collapsed && (
             <div>
-              <div className="logo-name">Zenith</div>
+              <div className="logo-name">Finex</div>
               <div className="logo-sub">AI FINANCE</div>
             </div>
           )}
@@ -185,9 +183,9 @@ export function App() {
           ))}
         </nav>
 
-        {/* Collapse btn - hidden on mobile */}
-        <button 
-          className="sidebar-collapse hide-mobile" 
+        {/* Collapse btn */}
+        <button
+          className="sidebar-collapse hide-mobile"
           onClick={() => setCollapsed(!collapsed)}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -203,7 +201,6 @@ export function App() {
       {/* ── Main ── */}
       <main className={`main-content ${collapsed ? 'sidebar-collapsed' : ''} ${isCoach ? 'coach-mode' : ''}`}>
 
-        {/* Dashboard topbar — greeting + privacy badge */}
         {tab === 'dashboard' && (
           <div className="topbar">
             <div>
@@ -225,7 +222,6 @@ export function App() {
           </div>
         )}
 
-        {/* Expenses page header */}
         {tab === 'expense' && (
           <div className="page-header-row">
             <div>
@@ -240,7 +236,6 @@ export function App() {
           </div>
         )}
 
-        {/* Bills page header */}
         {tab === 'bills' && (
           <div className="page-header-row">
             <div>
@@ -256,7 +251,6 @@ export function App() {
           </div>
         )}
 
-        {/* Clear banner */}
         {showClear && (
           <div className="clear-banner">
             <div>
@@ -270,7 +264,6 @@ export function App() {
           </div>
         )}
 
-        {/* Content */}
         <div className={`tab-content ${isCoach ? 'tab-coach' : ''}`} key={tab}>
           {tab === 'dashboard' && <DashboardTab />}
           {tab === 'expense'   && <ExpenseTab />}
