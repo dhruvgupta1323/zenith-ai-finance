@@ -57,11 +57,11 @@ function getFormattedDate() {
 }
 
 export function App() {
-  const [ready, setReady]               = useState(false);
-  const [error, setError]               = useState('');
-  const [tab, setTab]                   = useState<Tab>('dashboard');
-  const [showClear, setShowClear]       = useState(false);
-  const [collapsed, setCollapsed]       = useState(false);
+  const [ready, setReady]         = useState(false);
+  const [error, setError]         = useState('');
+  const [tab, setTab]             = useState<Tab>('dashboard');
+  const [showClear, setShowClear] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     Promise.all([initSDK(), db.initialize()])
@@ -153,8 +153,8 @@ export function App() {
       {/* ── Main ── */}
       <main className={`main-content ${collapsed ? 'sidebar-collapsed' : ''} ${isCoach ? 'coach-mode' : ''}`}>
 
-        {/* Topbar */}
-        {!isCoach && (
+        {/* Dashboard topbar — greeting + privacy badge */}
+        {tab === 'dashboard' && (
           <div className="topbar">
             <div>
               <h1 className="page-greeting">{getGreeting()} 👋</h1>
@@ -175,22 +175,34 @@ export function App() {
           </div>
         )}
 
-        {/* Expense page header (title shown inside topbar area) */}
-        {(tab === 'expense' || tab === 'bills') && (
+        {/* Expenses page header */}
+        {tab === 'expense' && (
           <div className="page-header-row">
-            {tab === 'expense' && (
-              <>
-                <div>
-                  <h1 className="page-title-lg">Expenses</h1>
-                </div>
-              </>
-            )}
-            {tab === 'bills' && (
-              <div>
-                <h1 className="page-title-lg">Recurring Bills</h1>
-                <p style={{ fontSize: '13px', color: '#9CA3AF', marginTop: '2px' }}>Track subscriptions and detected recurring spending</p>
-              </div>
-            )}
+            <div>
+              <h1 className="page-title-lg">Expenses</h1>
+            </div>
+            <button className="icon-btn" onClick={() => setShowClear(!showClear)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Bills page header */}
+        {tab === 'bills' && (
+          <div className="page-header-row">
+            <div>
+              <h1 className="page-title-lg">Recurring Bills</h1>
+              <p style={{ fontSize: '13px', color: '#9CA3AF', marginTop: '2px' }}>Track subscriptions and detected recurring spending</p>
+            </div>
+            <button className="icon-btn" onClick={() => setShowClear(!showClear)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+              </svg>
+            </button>
           </div>
         )}
 
