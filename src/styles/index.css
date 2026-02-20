@@ -596,3 +596,268 @@ input:focus, select:focus {
   gap: 12px;
   align-items: center;
 }
+
+/* ── Mobile Navigation ── */
+.mobile-nav-toggle {
+  display: none;
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 300;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-nav-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 190;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.mobile-nav-overlay.visible {
+  opacity: 1;
+}
+
+/* ── Responsive Grid Helpers ── */
+@media (max-width: 1024px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  
+  .main-content {
+    margin-left: 0 !important;
+    padding-top: 60px;
+  }
+  
+  .mobile-nav-toggle {
+    display: flex;
+  }
+  
+  .topbar,
+  .page-header-row {
+    padding: 20px 20px 0;
+  }
+  
+  .tab-content {
+    padding: 16px 20px 20px;
+  }
+  
+  .coach-body {
+    padding: 24px 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Stat cards - single column */
+  .stat-card {
+    padding: 16px;
+  }
+  
+  .stat-value {
+    font-size: 22px;
+  }
+  
+  /* Page titles */
+  .page-greeting {
+    font-size: 20px;
+  }
+  
+  .page-title-lg {
+    font-size: 22px;
+  }
+  
+  /* Privacy badge */
+  .privacy-badge {
+    font-size: 10px;
+    padding: 5px 10px;
+  }
+  
+  /* Cards */
+  .card {
+    padding: 16px;
+    border-radius: 14px;
+  }
+  
+  /* Form elements */
+  input, select {
+    padding: 12px 14px;
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  /* Buttons */
+  .btn {
+    padding: 12px 16px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  
+  /* Clear banner */
+  .clear-banner {
+    margin: 12px 16px 0;
+    padding: 12px 14px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  /* Transaction rows */
+  .txn-row {
+    padding: 12px 14px;
+    flex-wrap: wrap;
+  }
+  
+  .txn-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+  
+  /* Coach input bar */
+  .coach-input-bar {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+  
+  .coach-input-bar > div {
+    border-radius: 10px !important;
+    padding: 4px 6px 4px 14px !important;
+  }
+  
+  .coach-input-bar button {
+    width: 44px !important;
+    height: 44px !important;
+  }
+  
+  /* Bill banner */
+  .bill-banner {
+    flex-direction: column;
+    text-align: center;
+    gap: 16px;
+    padding: 20px;
+  }
+  
+  .bill-banner > div:last-child {
+    text-align: center !important;
+  }
+}
+
+/* Tablet specific */
+@media (min-width: 769px) and (max-width: 1024px) {
+  /* 2 column grids */
+  .stat-card {
+    padding: 18px;
+  }
+  
+  .tab-content {
+    padding: 20px 24px 24px;
+  }
+}
+
+/* Responsive helpers */
+@media (max-width: 640px) {
+  .hide-mobile {
+    display: none !important;
+  }
+  
+  .full-width-mobile {
+    width: 100% !important;
+  }
+  
+  .text-center-mobile {
+    text-align: center !important;
+  }
+  
+  /* Stack flex containers on mobile */
+  .flex-stack-mobile {
+    flex-direction: column !important;
+  }
+  
+  /* Dashboard stats */
+  .dashboard-stats {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Spending + Category side by side */
+  .spending-category-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Chat messages */
+  .chat-message {
+    max-width: 90% !important;
+  }
+  
+  /* Form grid */
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Filter row */
+  .filter-row {
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+  
+  .filter-row select {
+    width: 100% !important;
+  }
+  
+  /* Health ring section */
+  .health-section {
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+  
+  .health-section > div:last-child {
+    margin-top: 16px !important;
+  }
+}
+
+/* Touch-friendly tap targets */
+@media (pointer: coarse) {
+  button,
+  .sidebar-item,
+  .chip,
+  .icon-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  input, select {
+    min-height: 44px;
+  }
+  
+  /* Larger touch targets for mobile */
+  .txn-row button {
+    width: 40px !important;
+    height: 40px !important;
+  }
+}
+
+/* Prevent horizontal scroll */
+html, body {
+  overflow-x: hidden;
+}
+
+/* Smooth scrolling */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

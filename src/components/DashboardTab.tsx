@@ -123,7 +123,7 @@ export default function DashboardTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
       {/* ── Stat Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px' }}>
+      <div className="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
         {statCards.map((s, i) => (
           <div key={i} className="stat-card">
             {s.trend && (
@@ -195,7 +195,7 @@ export default function DashboardTab() {
       </div>
 
       {/* ── Spending + By Category side by side ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div className="spending-category-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
 
         {/* Spending Breakdown */}
         <div className="card">

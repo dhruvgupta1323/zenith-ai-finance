@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { initSDK } from './sdk';
 import { db } from './services/db';
 import DashboardTab from './components/DashboardTab';
@@ -62,12 +62,35 @@ export function App() {
   const [tab, setTab]             = useState<Tab>('dashboard');
   const [showClear, setShowClear] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     Promise.all([initSDK(), db.initialize()])
       .then(() => setReady(true))
       .catch(err => setError(err.message));
   }, []);
+
+  // Close mobile menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (mobileMenuOpen && sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
+        const toggleBtn = document.querySelector('.mobile-nav-toggle');
+        if (toggleBtn && !toggleBtn.contains(event.target as Node)) {
+          setMobileMenuOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [mobileMenuOpen]);
+
+  // Close mobile menu when changing tabs
+  const handleTabChange = (newTab: Tab) => {
+    setTab(newTab);
+    setMobileMenuOpen(false);
+  };
 
   const clearAllData = () => {
     localStorage.removeItem('zenith-txns');
@@ -95,8 +118,32 @@ export function App() {
   return (
     <div className="app-shell">
 
+      {/* Mobile Navigation Toggle */}
+      <button 
+        className="mobile-nav-toggle" 
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        aria-label="Toggle navigation menu"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {mobileMenuOpen ? (
+            <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
+          ) : (
+            <><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></>
+          )}
+        </svg>
+      </button>
+
+      {/* Mobile Overlay */}
+      <div 
+        className={`mobile-nav-overlay ${mobileMenuOpen ? 'visible' : ''}`}
+        onClick={() => setMobileMenuOpen(false)}
+      />
+
       {/* ── Sidebar ── */}
-      <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+      <aside 
+        ref={sidebarRef}
+        className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileMenuOpen ? 'mobile-open' : ''}`}
+      >
 
         {/* Logo */}
         <div className="sidebar-logo">
@@ -125,7 +172,7 @@ export function App() {
             <button
               key={t.id}
               className={`sidebar-item ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
+              onClick={() => handleTabChange(t.id)}
             >
               <span className="sidebar-icon">{t.icon}</span>
               {!collapsed && (
@@ -138,8 +185,11 @@ export function App() {
           ))}
         </nav>
 
-        {/* Collapse btn */}
-        <button className="sidebar-collapse" onClick={() => setCollapsed(!collapsed)}>
+        {/* Collapse btn - hidden on mobile */}
+        <button 
+          className="sidebar-collapse hide-mobile" 
+          onClick={() => setCollapsed(!collapsed)}
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             {collapsed
               ? <polyline points="9 18 15 12 9 6"/>
@@ -161,7 +211,7 @@ export function App() {
               <p className="page-sub-date">{getFormattedDate()} · Here's your financial summary</p>
             </div>
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <div className="privacy-badge">
+              <div className="privacy-badge hide-mobile">
                 <span className="privacy-dot"/>
                 Privacy-First · On-Device AI
               </div>

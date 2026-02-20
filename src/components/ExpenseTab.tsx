@@ -140,7 +140,7 @@ export default function ExpenseTab() {
               })}
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div style={{ gridColumn: '1/-1' }}>
               <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: '7px', textTransform: 'uppercase' }}>Description</div>
               <input value={form.item} onChange={e => setForm({ ...form, item: e.target.value })}
@@ -175,7 +175,7 @@ export default function ExpenseTab() {
       )}
 
       {/* ── Search + Filter ── */}
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div className="filter-row" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
         <div style={{ flex: 1, position: 'relative' }}>
           <svg style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }}
             width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
